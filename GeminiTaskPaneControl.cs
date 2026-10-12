@@ -19,7 +19,6 @@ namespace GeminiSwAddin
         public static SldWorks CurrentSwApp { get; set; }
 
         private readonly SldWorks _swApp;
-        private readonly Button _captureButton;
         private readonly WebView2 _webView;
         private readonly string _userDataFolder;
         private bool _webViewReady;
@@ -40,18 +39,9 @@ namespace GeminiSwAddin
                 "GeminiSwAddin",
                 "WebView2UserData");
 
-            _captureButton = new Button
-            {
-                Text = "Capture & Paste Viewport",
-                Dock = DockStyle.Top,
-                Height = 34
-            };
-            _captureButton.Click += CaptureButton_Click;
-
             _webView = new WebView2 { Dock = DockStyle.Fill };
 
             Controls.Add(_webView);
-            Controls.Add(_captureButton);
             Load += GeminiTaskPaneControl_Load;
             ResumeLayout();
         }
@@ -72,6 +62,7 @@ namespace GeminiSwAddin
                 _webView.CoreWebView2.Settings.IsStatusBarEnabled = false;
                 _webView.CoreWebView2.Settings.AreDevToolsEnabled = false;
                 _webView.CoreWebView2.NavigationCompleted += WebView_NavigationCompleted;
+                _webView.CoreWebView2.WebMessageReceived += WebMessageReceived;
                 _webView.CoreWebView2.Navigate("https://gemini.google.com");
             }
             catch (Exception ex)
@@ -84,11 +75,55 @@ namespace GeminiSwAddin
         private void WebView_NavigationCompleted(object sender, CoreWebView2NavigationCompletedEventArgs e)
         {
             _webViewReady = e.IsSuccess;
+            if (e.IsSuccess)
+            {
+                _ = InstallCaptureButtonAsync();
+            }
         }
 
-        private async void CaptureButton_Click(object sender, EventArgs e)
+        private async void WebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
         {
-            await CaptureAndPasteAsync();
+            if (e.TryGetWebMessageAsString() == "capture-viewport")
+            {
+                await CaptureAndPasteAsync();
+            }
+        }
+
+        private async Task InstallCaptureButtonAsync()
+        {
+            if (_webView.CoreWebView2 == null)
+            {
+                return;
+            }
+
+            await _webView.CoreWebView2.ExecuteScriptAsync(@"(() => {
+                const id = 'solidworks-capture-viewport';
+                let button = document.getElementById(id);
+                if (!button) {
+                    button = document.createElement('button');
+                    button.id = id;
+                    button.type = 'button';
+                    button.textContent = 'Capture View';
+                    button.title = 'Capture the SolidWorks viewport and paste it into Gemini';
+                    button.addEventListener('click', () => chrome.webview.postMessage('capture-viewport'));
+                    document.body.appendChild(button);
+                }
+                button.style.cssText = [
+                    'position: fixed',
+                    'top: 8px',
+                    'right: 76px',
+                    'z-index: 2147483647',
+                    'height: 26px',
+                    'padding: 0 12px',
+                    'border: 1px solid #5f6368',
+                    'border-radius: 13px',
+                    'background: #1f1f1f',
+                    'color: #ffffff',
+                    'font: 700 12px Arial, sans-serif',
+                    'cursor: pointer',
+                    'box-shadow: 0 1px 4px rgba(0,0,0,.45)'
+                ].join(';');
+            })();");
         }
 
         private async Task CaptureAndPasteAsync()
@@ -104,7 +139,6 @@ namespace GeminiSwAddin
             }
 
             _captureInProgress = true;
-            _captureButton.Enabled = false;
             string tempFile = null;
 
             try
@@ -180,7 +214,6 @@ namespace GeminiSwAddin
                 }
 
                 _captureInProgress = false;
-                _captureButton.Enabled = true;
             }
         }
 
@@ -189,7 +222,6 @@ namespace GeminiSwAddin
             if (disposing)
             {
                 _webView?.Dispose();
-                _captureButton?.Dispose();
             }
 
             base.Dispose(disposing);
